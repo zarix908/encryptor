@@ -1,0 +1,7 @@
+[Desktop Entry]
+Version=1.0
+Name=Encrypter
+Exec=encrypter
+Type=Application
+Icon=icon
+Categories=Security
