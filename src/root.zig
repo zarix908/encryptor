@@ -1,26 +1,59 @@
 const std = @import("std");
+const call = @import("call.zig");
+const errors = @import("errors.zig");
 
 pub fn init() !void {
-    const result = std.posix.getenv("APPDIR") orelse "";
-    std.debug.print("APPDIR: {s}\n", .{result});
+    const appdir = std.posix.getenv("APPDIR") orelse return errors.Err.AppDirEnvNotFound;
+    const keepassxc = "bin/keepassxc-cli";
+    const age_keygen = "bin/age-keygen";
+    const age = "bin/age";
 
     var buffer: [1024]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     const allocator = fba.allocator();
 
-    const path_items = [_][]const u8{result, "usr/bin/keepassxc-cli"};
-    const keepassxc_path = try std.fs.path.join(allocator, &path_items);
+    var output = try call.call(
+        allocator,
+        keepassxc,
+        4,
+        &.{ "add", "--generate", "/home/user/sync/kdbx/private.kdbx", "cold_keys/enc_new" },
+        appdir,
+        call.Stdin.Inherit,
+        std.process.Child.StdIo.Inherit,
+    );
+    std.debug.assert(output == null);
 
-    const gpa = std.heap.page_allocator;
+    const key = try call.call(
+        allocator,
+        age_keygen,
+        0,
+        &.{},
+        appdir,
+        call.Stdin.Ignore,
+        std.process.Child.StdIo.Pipe,
+    ) orelse return errors.Err.UnexpectedNull;
 
-    var child = std.process.Child.init(&[_][]const u8{keepassxc_path, "--help"}, gpa);
+    output = try call.call(
+        allocator,
+        keepassxc,
+        6,
+        &.{ "show", "--attributes", "password", "--show-protected", "/home/user/sync/kdbx/private.kdbx", "cold_keys/enc_new" },
+        appdir,
+        call.Stdin.Inherit,
+        std.process.Child.StdIo.Inherit,
+    );
+    std.debug.assert(output == null);
 
-    child.stdin_behavior = .Inherit;
-    child.stdout_behavior = .Inherit;
-    child.stderr_behavior = .Inherit;
+    output = try call.call(
+        allocator,
+        age,
+        3,
+        &.{ "--passphrase", "--output", "key.age" },
+        appdir,
+        call.Stdin{ .Pipe = key },
+        std.process.Child.StdIo.Inherit,
+    );
+    std.debug.assert(output == null);
 
-    try child.spawn();
-
-    const term = try child.wait();
-    std.debug.print("Child exited with code {}\n", .{term.Exited});
+    std.debug.print("Completed successfully\n", .{});
 }

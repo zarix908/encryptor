@@ -1,6 +1,5 @@
 zig-out/
 .zig-cache/
-data/
 AppDir/
 build/
 bin/
