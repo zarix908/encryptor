@@ -1,5 +1,4 @@
 zig-out/
 .zig-cache/
-AppDir/
 build/
-bin/
+build_bin/

@@ -15,28 +15,27 @@ pub const Stdin = union(enum) {
     }
 };
 
-pub fn call(
-    allocator: std.mem.Allocator,
+pub fn call(cmd_args_len: comptime_int, args: struct {
+    path_allocator: std.mem.Allocator,
     executable: []const u8,
-    args_len: comptime_int,
-    args: *const [args_len][]const u8,
+    cmd_args: *const [cmd_args_len][]const u8,
     appdir: []const u8,
     input: Stdin,
     output: std.process.Child.StdIo,
-) !?[]u8 {
-    var path_items = [_][]const u8{ appdir, executable };
-    const exec_path = try std.fs.path.join(allocator, &path_items);
-    defer allocator.free(exec_path);
+}) !?[]u8 {
+    var path_items = [_][]const u8{ args.appdir, args.executable };
+    const exec_path = try std.fs.path.join(args.path_allocator, &path_items);
+    defer args.path_allocator.free(exec_path);
 
-    var argv: [args_len + 1][]const u8 = undefined;
+    var argv: [cmd_args_len + 1][]const u8 = undefined;
     argv[0] = exec_path;
-    @memmove(argv[1..], args);
+    @memmove(argv[1..], args.cmd_args);
 
     var child = std.process.Child.init(&argv, std.heap.page_allocator);
 
-    child.stdin_behavior = input.to_file_input();
-    child.stdout_behavior = output;
-    child.stderr_behavior = output;
+    child.stdin_behavior = args.input.to_file_input();
+    child.stdout_behavior = args.output;
+    child.stderr_behavior = args.output;
     child.expand_arg0 = .no_expand;
     child.progress_node = std.Progress.Node.none;
 
@@ -50,11 +49,11 @@ pub fn call(
         _ = child.kill() catch {};
     }
 
-    if (input == .Pipe) {
+    if (args.input == .Pipe) {
         if (child.stdin) |stdin| {
             var writer = stdin.writer(&.{});
             const in = &writer.interface;
-            try in.writeAll(input.Pipe);
+            try in.writeAll(args.input.Pipe);
             try in.flush();
             stdin.close();
             child.stdin = null;

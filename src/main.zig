@@ -2,5 +2,5 @@ const std = @import("std");
 const encrypter = @import("encrypter");
 
 pub fn main() !void {
-    try encrypter.init();
+    try encrypter.encrypt();
 }
