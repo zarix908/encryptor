@@ -22,7 +22,16 @@ pub fn encrypt(keepass_db_path: []const u8, target_filepath: []const u8) !void {
     var tmp_dir = try TmpDir.create(small_strings_alloc, target_filename);
     defer tmp_dir.clear(small_strings_alloc) catch {};
 
-    try generateKey(exec_allocator, small_strings_alloc, execs, keepass_db_path, tmp_dir);
+    const public_key = try generateKey(exec_allocator, small_strings_alloc, execs, keepass_db_path, tmp_dir);
+    defer small_strings_alloc.free(public_key);
+    std.debug.print("public key: {s}\n", .{public_key});
+
+    // const target_file = try std.fs.cwd().openFile(target_filename, .{});
+    // const target_file_buffer: [1024]u8 = undefined;
+    // const target_file_reader = target_file.reader(target_file_buffer);
+    // const reader_ptr = &target_file_reader.interface;
+
+    // try call.call(exec_allocator, &.{execs.age, })
 
     std.debug.print("Completed successfully\n", .{});
 }
@@ -33,13 +42,13 @@ fn generateKey(
     execs: ExecPaths,
     keepass_db_path: []const u8,
     tmp_dir: TmpDir,
-) !void {
+) ![]const u8 {
     const key_filepath = try std.fs.path.join(small_strings_alloc, &.{ tmp_dir.getPath(), "key.age" });
     defer small_strings_alloc.free(key_filepath);
 
     var output = try call.call(
         exec_allocator,
-        &.{ execs.keepassxc, "add", "--generate", keepass_db_path, "cold_keys/enc_new" },
+        &.{ execs.keepassxc, "add", "--generate", keepass_db_path, "enc_new" },
         call.Stdin.Inherit,
         std.process.Child.StdIo.Inherit,
     );
@@ -62,7 +71,7 @@ fn generateKey(
             "password",
             "--show-protected",
             keepass_db_path,
-            "cold_keys/enc_new",
+            "enc_new",
         },
         call.Stdin.Inherit,
         std.process.Child.StdIo.Inherit,
@@ -81,6 +90,26 @@ fn generateKey(
         std.process.Child.StdIo.Inherit,
     );
     std.debug.assert(output == null);
+
+    const public_key_output = try call.call(
+        exec_allocator,
+        &.{ execs.age_keygen, "-y" },
+        call.Stdin{ .PipeBuffer = key },
+        std.process.Child.StdIo.Pipe,
+    ) orelse return errors.Err.UnexpectedNull;
+    defer exec_allocator.free(public_key_output);
+
+    var public_key_iter = std.mem.splitScalar(
+        u8,
+        public_key_output,
+        '\n',
+    );
+    const pub_key = public_key_iter.next() orelse return errors.Err.UnexpectedNull;
+
+    const public_key = try small_strings_alloc.alloc(u8, pub_key.len);
+    @memmove(public_key, pub_key);
+
+    return public_key;
 }
 
 fn buildExecPaths(allocator: std.mem.Allocator) !ExecPaths {
