@@ -3,8 +3,9 @@ const call = @import("call.zig");
 const errors = @import("errors.zig");
 const ExecPaths = @import("ExecPaths.zig");
 const TmpDir = @import("TmpDir.zig");
+const libtar = @cImport(@cInclude("libtar.h"));
 
-pub fn encrypt(keepass_db_path: []const u8, target_filepath: []const u8) !void {
+pub fn encrypt(program_path: []const u8, keepass_db_path: []const u8, target_filepath: []const u8) !void {
     const max_string_len = 4096;
     var buffer: [max_string_len * 64]u8 = undefined; // assume that less than 64 strings will be allocated
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
@@ -26,12 +27,22 @@ pub fn encrypt(keepass_db_path: []const u8, target_filepath: []const u8) !void {
     defer small_strings_alloc.free(public_key);
     std.debug.print("public key: {s}\n", .{public_key});
 
-    // const target_file = try std.fs.cwd().openFile(target_filename, .{});
-    // const target_file_buffer: [1024]u8 = undefined;
-    // const target_file_reader = target_file.reader(target_file_buffer);
-    // const reader_ptr = &target_file_reader.interface;
+    const encrypted_filename = try std.mem.join(small_strings_alloc, ".", &.{ target_filename, "age" });
+    const encrypted_filepath = try std.fs.path.join(small_strings_alloc, &.{ tmp_dir.path, encrypted_filename });
+    defer small_strings_alloc.free(encrypted_filepath);
 
-    // try call.call(exec_allocator, &.{execs.age, })
+    try call.call(
+        void,
+        exec_allocator,
+        &.{ execs.age, "-r", public_key, "-o", encrypted_filepath, target_filepath },
+        call.Stdin.Ignore,
+        std.process.Child.StdIo.Inherit,
+    );
+
+    try std.fs.cwd().copyFile(program_path, try std.fs.openDirAbsolute(tmp_dir.getPath(), .{}), "encrypter", .{});
+
+    var tar: *libtar.TAR = undefined;
+    libtar.tar_open(tar, pathname: [*c]const u8, @"type": [*c]tartype_t, oflags: c_int, mode: c_int, options: c_int)
 
     std.debug.print("Completed successfully\n", .{});
 }
@@ -46,23 +57,25 @@ fn generateKey(
     const key_filepath = try std.fs.path.join(small_strings_alloc, &.{ tmp_dir.getPath(), "key.age" });
     defer small_strings_alloc.free(key_filepath);
 
-    var output = try call.call(
+    try call.call(
+        void,
         exec_allocator,
         &.{ execs.keepassxc, "add", "--generate", keepass_db_path, "enc_new" },
         call.Stdin.Inherit,
         std.process.Child.StdIo.Inherit,
     );
-    std.debug.assert(output == null);
 
     const key = try call.call(
+        []u8,
         exec_allocator,
         &.{execs.age_keygen},
         call.Stdin.Ignore,
         std.process.Child.StdIo.Pipe,
-    ) orelse return errors.Err.UnexpectedNull;
+    );
     defer exec_allocator.free(key);
 
-    output = try call.call(
+    try call.call(
+        void,
         exec_allocator,
         &.{
             execs.keepassxc,
@@ -76,9 +89,9 @@ fn generateKey(
         call.Stdin.Inherit,
         std.process.Child.StdIo.Inherit,
     );
-    std.debug.assert(output == null);
 
-    output = try call.call(
+    try call.call(
+        void,
         exec_allocator,
         &.{
             execs.age,
@@ -89,14 +102,14 @@ fn generateKey(
         call.Stdin{ .PipeBuffer = key },
         std.process.Child.StdIo.Inherit,
     );
-    std.debug.assert(output == null);
 
     const public_key_output = try call.call(
+        []u8,
         exec_allocator,
         &.{ execs.age_keygen, "-y" },
         call.Stdin{ .PipeBuffer = key },
         std.process.Child.StdIo.Pipe,
-    ) orelse return errors.Err.UnexpectedNull;
+    );
     defer exec_allocator.free(public_key_output);
 
     var public_key_iter = std.mem.splitScalar(

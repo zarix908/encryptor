@@ -18,11 +18,12 @@ pub const Stdin = union(enum) {
 };
 
 pub fn call(
+    comptime T: type,
     allocator: std.mem.Allocator,
     argv: []const []const u8,
     input: Stdin,
-    output: std.process.Child.StdIo,
-) !?[]u8 {
+    comptime output: std.process.Child.StdIo,
+) !T {
     var child = std.process.Child.init(argv, allocator);
 
     child.stdin_behavior = input.toFileInput();
@@ -79,22 +80,35 @@ pub fn call(
         else => {},
     }
 
-    if (child.stdout_behavior == .Pipe) {
-        try child.collectOutput(allocator, &stdout, &stderr, 50 * 1024);
+    switch (T) {
+        void => {
+            const term = try child.wait();
+            if (term.Exited != 0) {
+                return errors.Err.NonNilExitCode;
+            }
+        },
+        []u8 => {
+            comptime {
+                if (output != std.process.Child.StdIo.Pipe) {
+                    @compileError("when T is []u8 output arg must be std.process.Child.StdIo.Pipe");
+                }
+            }
+
+            try child.collectOutput(allocator, &stdout, &stderr, 50 * 1024);
+
+            const term = try child.wait();
+            if (term.Exited != 0) {
+                if (child.stderr_behavior == .Pipe) {
+                    std.debug.print("stderr: {s}", .{stderr.items});
+                }
+
+                return errors.Err.NonNilExitCode;
+            }
+
+            return try stdout.toOwnedSlice(allocator);
+        },
+        else => {
+            @compileError("T must be either void or []u8");
+        },
     }
-
-    const term = try child.wait();
-    if (term.Exited != 0) {
-        if (child.stderr_behavior == .Pipe) {
-            std.debug.print("stderr: {s}", .{stderr.items});
-        }
-
-        return errors.Err.NonNilExitCode;
-    }
-
-    if (child.stdout_behavior == .Pipe) {
-        return try stdout.toOwnedSlice(allocator);
-    }
-
-    return null;
 }

@@ -14,11 +14,11 @@ pub fn getPath(self: *const @This()) []const u8 {
 }
 
 pub fn clear(self: *@This(), allocator: std.mem.Allocator) !void {
-    const name = std.fs.path.basename(self.path);
+    // const name = std.fs.path.basename(self.path);
 
-    var dir = try std.fs.openDirAbsolute("/tmp", .{});
-    defer dir.close();
-    try dir.deleteTree(name);
+    // var dir = try std.fs.openDirAbsolute("/tmp", .{});
+    // defer dir.close();
+    // try dir.deleteTree(name);
 
     allocator.free(self.path);
     self.path = undefined;
